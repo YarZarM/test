@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { runPrediction, getLatestPrediction } from '../controllers/predictcontroller';
+import { runPrediction, getLatestPrediction } from '../controllers/predictcontroller.js';
 
 const router = Router();
 
