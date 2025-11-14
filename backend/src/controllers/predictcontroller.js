@@ -126,11 +126,7 @@ export const runPrediction = async (req, res) => {
         //     .single();
         // if (userError) throw userError;
 
-        // if (userData && userData.fcm_token) {
-        //     fcmToken = userData.fcm_token;
-        // } else {
-        //     fcmToken = undefined;
-        // }
+        // const fcmToken = userData?.fcm_token || null;
 
         // let lastNotified;
         // if (userData && userData.last_notified_at) {
@@ -145,7 +141,7 @@ export const runPrediction = async (req, res) => {
         //     await admin.messaging().send({
         //     token: fcmToken,
         //     notification: {
-        //         title: '! Migraine Risk Alert',
+        //         title: '⚠️ Migraine Risk Alert',
         //         body: `Next-hour migraine risk: ${(p_next_hour * 100).toFixed(0)}%`
         //     }
         // });
