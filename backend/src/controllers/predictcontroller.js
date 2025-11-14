@@ -81,6 +81,8 @@ export const runPrediction = async (req, res) => {
             };
         })
 
+        windowData.timestamp = Date.now();
+
         const mlPayload = {
             window: windowData
         }
