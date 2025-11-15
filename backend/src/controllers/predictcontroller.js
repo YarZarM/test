@@ -95,21 +95,44 @@ export const runPredictionInternal = async () => {
         last_item: windowData[windowData.length - 1]
     });
   
-    const mlResponse = await axios.post(process.env.ML_URL, mlPayload, {
-        timeout: 30000, // 30 second timeout
-        headers: {
-            'Content-Type': 'application/json'
-        }
-    });
+    // const mlResponse = await axios.post(process.env.ML_URL, mlPayload, {
+    //     timeout: 60000, 
+    //     headers: {
+    //         'Content-Type': 'application/json'
+    //     }
+    // });
+
+    let mlResponse;
+    let retries = 2;
     
-    console.log(`ML prediction received: p_next_hour=${p_next_hour}`);
+    for (let i = 0; i <= retries; i++) {
+        try {
+            mlResponse = await axios.post(process.env.ML_URL, mlPayload, {
+                timeout: 60000, // 60 second timeout for Render cold starts
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            break; // Success, exit retry loop
+        } catch (error) {
+            if (i === retries) throw error; // Last retry failed
+            console.log(`⚠️  Attempt ${i + 1} failed (${error.message}), retrying in 5s...`);
+            await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5s before retry
+        }
+    }
+    
     const { p_next_hour, top_factors, timestamp } = mlResponse.data;
+    console.log(`ML prediction received: p_next_hour=${p_next_hour}`);
   
     const { error: insertError } = await supabase
       .from('predictions')
       .insert([{ user_id: userId, p_next_hour, top_factors, timestamp }]);
   
-    if (insertError) throw insertError;
+    if (insertError) {
+        console.error('Failed to insert prediction:', insertError);
+        throw insertError;
+    }
+    console.log(`Prediction saved to database`);
   
     return { p_next_hour, top_factors, timestamp, block_used: blockIndex + 1, total_blocks: numBlocks };
 };
