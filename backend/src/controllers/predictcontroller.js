@@ -48,6 +48,72 @@ const getRecommendedActions = (top_factors) => {
     return recommended_actions;
 }
 
+let demoCounter = 0;
+
+export const runPredictionInternal = async () => {
+    const userId = 'YZMM';
+    const blockSize = 24;
+  
+    const { data: featureData, error: featureError } = await supabase
+      .from('features')
+      .select('timestamp, workload, stress, hrv')
+      .eq('user_id', userId)
+      .order('timestamp', { ascending: true })
+  
+    if (featureError) throw featureError;
+
+    if (!featureData || featureData.length < blockSize) {
+        throw new Error(`Insufficient data: only ${featureData?.length || 0} records found, need at least ${blockSize}`);
+    }
+
+    const numBlocks = Math.floor(featureData.length / blockSize);
+    const blockIndex = demoCounter % numBlocks;
+    const start = blockIndex * blockSize;
+    const end = start + blockSize;
+
+    console.log(`Demo mode: Using block ${blockIndex + 1}/${numBlocks} (rows ${start}-${end-1}), counter=${demoCounter}`);
+  
+    const windowData = featureData.slice(start, end).map(item => {
+        return {
+            workload_0_10: item.workload,
+            stress_0_10: item.stress,
+            hrv_rmssd_ms: item.hrv
+        };
+    })
+
+    demoCounter += 1;
+
+    const mlPayload = {
+        window: windowData,
+        timestamp: Date.now()
+    }
+
+    console.log(`Calling ML service at: ${process.env.ML_URL}`);
+    console.log(`Payload sample:`, {
+        window_length: windowData.length,
+        first_item: windowData[0],
+        last_item: windowData[windowData.length - 1]
+    });
+  
+    const mlResponse = await axios.post(process.env.ML_URL, mlPayload, {
+        timeout: 30000, // 30 second timeout
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    });
+    
+    console.log(`ML prediction received: p_next_hour=${p_next_hour}`);
+    const { p_next_hour, top_factors, timestamp } = mlResponse.data;
+  
+    const { error: insertError } = await supabase
+      .from('predictions')
+      .insert([{ user_id: userId, p_next_hour, top_factors, timestamp }]);
+  
+    if (insertError) throw insertError;
+  
+    return { p_next_hour, top_factors, timestamp, block_used: blockIndex + 1, total_blocks: numBlocks };
+};
+
 export const runPrediction = async (req, res) => {
     const userId = 'YZMM';
     const features = ['workload', 'stress', 'hrv'];
@@ -159,38 +225,71 @@ export const runPrediction = async (req, res) => {
     }
 }
 
-export const getLatestPrediction = async (req, res) => {
+export const getLatestPredictionInternal = async () => {
     const userId = 'YZMM';
+  
+    const { data: predictionData, error: predictionError } = await supabase
+      .from('predictions')
+      .select('p_next_hour, top_factors, timestamp')
+      .eq('user_id', userId)
+      .order('timestamp', { ascending: false })
+      .limit(1);
+  
+    if (predictionError) throw predictionError;
+    if (!predictionData || predictionData.length === 0) return null;
+  
+    const latest = predictionData[0];
+  
+    return {
+      ...latest,
+      recommendation: getRiskRecommendation(latest.p_next_hour),
+      recommended_actions: getRecommendedActions(latest.top_factors)
+    };
+};
 
+// export const getLatestPrediction = async (req, res) => {
+//     const userId = 'YZMM';
+
+//     try {
+//         const { data: predictionData, error: predictionError } = await supabase
+//             .from('predictions')
+//             .select('p_next_hour, top_factors, timestamp')
+//             .eq('user_id', userId)
+//             .order('timestamp', { ascending: false })
+//             .limit(1);
+
+//         if (predictionError) {
+//             console.error('Supabase select error:', predictionError);
+//             return res.status(500).json({ error: 'Supabase select failed', details: predictionError });
+//         }
+
+//         if (!predictionData) {
+//             return res.status(404).json({ error: 'No prediction found for the user.' });
+//         }
+
+//         const latest = predictionData[0];
+
+//         res.json({
+//             ...latest,
+//             recommendation: getRiskRecommendation(latest.p_next_hour),
+//             recommended_actions: getRecommendedActions(latest.top_factors)
+//         })
+
+//     } catch (error) {
+//         console.error('Error fetching latest prediction:', error);
+//         res.status(500).json({ error: 'Internal server error', details: error.message });
+//     }
+// }
+
+export const getLatestPrediction = async (req, res) => {
     try {
-        const { data: predictionData, error: predictionError } = await supabase
-            .from('predictions')
-            .select('p_next_hour, top_factors, timestamp')
-            .eq('user_id', userId)
-            .order('timestamp', { ascending: false })
-            .limit(1);
-
-        if (predictionError) {
-            console.error('Supabase select error:', predictionError);
-            return res.status(500).json({ error: 'Supabase select failed', details: predictionError });
-        }
-
-        if (!predictionData) {
-            return res.status(404).json({ error: 'No prediction found for the user.' });
-        }
-
-        const latest = predictionData[0];
-
-        res.json({
-            ...latest,
-            recommendation: getRiskRecommendation(latest.p_next_hour),
-            recommended_actions: getRecommendedActions(latest.top_factors)
-        })
-
-    } catch (error) {
-        console.error('Error fetching latest prediction:', error);
-        res.status(500).json({ error: 'Internal server error', details: error.message });
+      const latest = await getLatestPredictionInternal();
+      if (!latest) return res.status(404).json({ error: 'No prediction found' });
+      res.json(latest);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Internal server error', details: err.message });
     }
-}
+  };
 
 console.log('Loaded predictcontroller.js');

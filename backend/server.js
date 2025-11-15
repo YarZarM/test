@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 import app from './src/app.js';
+import './cron.js';
 
 dotenv.config();
 
