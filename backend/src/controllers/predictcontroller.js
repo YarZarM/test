@@ -104,46 +104,41 @@ export const runPrediction = async (req, res) => {
 
         if (insertError) throw insertError;
 
-        // Commented out the noti function since it will throw error without fcm token and need front end to request fcm token
+        // Get user's FCM token and last_notified_at
+        const { data: userData, error: userError } = await supabase
+            .from('users')
+            .select('fcm_token, last_notified_at')
+            .eq('id', userId)
+            .single();
+        if (userError) throw userError;
 
-        // // Get user's FCM token and last_notified_at
-        // const { data: userData, error: userError } = await supabase
-        //     .from('users')
-        //     .select('fcm_token, last_notified_at')
-        //     .eq('id', userId)
-        //     .single();
-        // if (userError) throw userError;
+        const expoPushToken = userData?.fcm_token || null;
+        const lastNotified = userData?.last_notified_at || new Date(0);
+        const hoursSince = (Date.now() - new Date(lastNotified).getTime()) / 3600000;
 
-        // const fcmToken = userData?.fcm_token || null;
+        // Send notification if threshold met and debounce passed
+        if (expoPushToken && p_next_hour >= RISK_THRESHOLD && hoursSince >= DEBOUNCE_HOURS) {
+            await fetch("https://exp.host/--/api/v2/push/send", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    to: expoPushToken,
+                    sound: "default",
+                    title: "⚠️ Migraine Risk Alert",
+                    body: `Next-hour risk: ${(p_next_hour * 100).toFixed(0)}%`
+    })
+        });
 
-        // let lastNotified;
-        // if (userData && userData.last_notified_at) {
-        // lastNotified = new Date(userData.last_notified_at);
-        // } else {
-        // lastNotified = new Date(0); // default value
-        // }
-        // const hoursSince = (Date.now() - lastNotified.getTime()) / (1000 * 60 * 60);
+        // Update last_notified_at in DB
+        await supabase
+            .from('users')
+            .update({ last_notified_at: new Date().toISOString() })
+            .eq('id', userId);
 
-        // // Send notification if threshold met and debounce passed
-        // if (fcmToken && p_next_hour >= RISK_THRESHOLD && hoursSince >= DEBOUNCE_HOURS) {
-        //     await admin.messaging().send({
-        //     token: fcmToken,
-        //     notification: {
-        //         title: '⚠️ Migraine Risk Alert',
-        //         body: `Next-hour migraine risk: ${(p_next_hour * 100).toFixed(0)}%`
-        //     }
-        // });
-
-        // // Update last_notified_at in DB
-        // await supabase
-        //     .from('users')
-        //     .update({ last_notified_at: new Date().toISOString() })
-        //     .eq('id', userId);
-
-        // console.log('Notification sent and timestamp updated');
-        // } else {
-        // console.log('No notification (below threshold or debounce active)');
-        // }
+        console.log('Notification sent and timestamp updated');
+        } else {
+        console.log('No notification (below threshold or debounce active)');
+        }
         
         res.json({
             user_id: userId,
